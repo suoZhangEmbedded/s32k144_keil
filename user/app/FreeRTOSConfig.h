@@ -147,14 +147,9 @@ See http://www.FreeRTOS.org/RTOS-Cortex-M3-M4.html. */
 #define configASSERT(x)                          if((x)==0) { taskDISABLE_INTERRUPTS(); for( ;; ); }
 
 /* Tickless Idle Mode */
-#define configUSE_TICKLESS_IDLE                  0 
+#define configUSE_TICKLESS_IDLE                  1 
 #define configEXPECTED_IDLE_TIME_BEFORE_SLEEP    2 
 #define configUSE_TICKLESS_IDLE_DECISION_HOOK    0 
-
-#define portSUPPRESS_TICKS_AND_SLEEP( xIdleTime ) application_sleep( xIdleTime )
-
-#define configPRE_SLEEP_PROCESSING( x ) 					application_sleep_enter_before( x )
-#define configPOST_SLEEP_PROCESSING( x ) 					application_sleep_enter_later( x )
 
 /* Definitions that map the FreeRTOS port interrupt handlers to their CMSIS
 standard names. */
