@@ -19,6 +19,15 @@
 
 void vLedTask( void *pvParameters );
 
+
+/*******************************************************************************
+Function: delay
+*******************************************************************************/
+void delay(uint32_t d)
+{
+	while(d--);
+}
+
 void sosc_8mhz_init(void)
 {
   SCG->SOSCDIV=0x00000101;  /* SOSCDIV1 & SOSCDIV2 =1: divide by 1 */
@@ -109,12 +118,330 @@ void led_triggle(int leds)
 	}
 }
 
-int main( void )
+/*******************************************************************************
+Function: LPTMR0_IRQHandler
+*******************************************************************************/
+void LPTMR0_IRQHandler(void)
+{
+
+	SEGGER_RTT_printf( 0, "LPTMR0_IRQHandler tick:%u.\r\n", xTaskGetTickCount() );
+	
+	SEGGER_RTT_printf( 0, "LPTMR0->CSR:%x.\r\n", LPTMR0->CSR );
+		
+	LPTMR0->CSR |= LPTMR_CSR_TCF(1); //写 1 清除定时器比较标志位
+	
+	// reset the MCU.
+  S32_SCB->AIRCR = 0x05FA0004;
+}
+
+/*******************************************************************************
+Function: init_lptmr_tick_interrupt
+Notes   : 32kHz RTC clock derived from 128kHz internal LPO
+        : Time counter mode, interrupt enabled
+				: 1 tick == 1ms
+*******************************************************************************/
+void init_lptmr_tick_interrupt( TickType_t xExpectedIdleTime )
+{
+		SEGGER_RTT_printf( 0, "init_lptmr_tick_interrupt xExpectedIdleTime tick:%u.\r\n", xExpectedIdleTime );
+	
+    // Peripheral Clock Control for LPTMR
+		// 使能 LPTMR 外设的接口时钟，允许访问 LPTMR 模块
+    PCC->PCCn[PCC_LPTMR0_INDEX] = PCC_PCCn_CGC_MASK; // Enable clock to LPTMR module - BUS_CLK
+	
+	  // [0] TEN  = 0 LPTMR 定时器失能
+		// 错误警告：定时器失能，将会复位LPTMR内部逻辑(包括LPTMR计数器寄存器和定时器比较标志位)
+	  LPTMR0->CSR = LPTMR_CSR_TEN(0);
+
+
+		/* LPTMR 时钟源有4种: 1: SIRCDIV2_CLK, 2: LPO1K_CLK, 3: RTC_CLKRTC_CLK, 4: BUS_CLK */
+		/* FreeRTOS 是 1ms 一个 tick, 因此需要配置 LPTMR 产生 单位是 1ms 的中断 */
+		/* S32K144 VLPS模式下，只能选择 LPO1K_CLK, 或者 RTC_CLKRTC_CLK  */
+		/* 这里选择 RTC_CLK,需要配置RTC_CLK时钟源，即寄存器 SIM->LPOCLKS[3-2] LPOCLKSEL,选择 LPO32K_CLK */
+		/* 因此这里 LPO32k_CLK 输出需要使能 */
+	
+		/* 错误警告：这里配置了 RTC 的时钟源，会影响RTC 的时钟，两者可能会冲突，请注意 */
+		/* 错误警告：LPO32k_CLK 和 LPO1k_CLK 不能同时使能，否则会选择 1K输出，请注意 */
+	
+		/* 第二种时钟方案：预分频器还可以旁路掉，也就是说 时钟源直接到 低功耗定时器计数寄存器，因此可以选择 LPO1K_CLK */
+	
+    // [5-4] RTCCLKSEL = 1 choose LPO32k_CLK
+    // [1] LPO32KCLKEN = 1 Enable LPO32k_CLK output
+    // [0] LPO1KCLKEN =  0 Disable LPO1k_CLK  output
+		SIM->LPOCLKS = SIM_LPOCLKS_RTCCLKSEL(1) | SIM_LPOCLKS_LPO32KCLKEN(1) | SIM_LPOCLKS_LPO1KCLKEN(0);
+
+    // LPO32K_CLK 时钟 到预分频器进行32分频，每16个上升沿，计数寄存器+1
+		// 这样 计数寄存器 ＋1 就是 1ms
+		// [6-3] PRESCALE  = 4 选择 32 分频
+    // [2] 	 PBYP      = 0 Enable 预分频器
+    // [1-0] PCS       = 2 根据手册2018.9.9 table 27-9 , 这里选择RTC_CLK
+		LPTMR0->PSR = LPTMR_PSR_PRESCALE(4) | LPTMR_PSR_PBYP(0) | LPTMR_PSR_PCS(2);
+
+
+		// [6] TIE  = 1 enable time interrupt
+    // [2] TFC  = 0 CNR is reset whenever TCF is set.
+    // [1] TMS  = 0 时间计数器模式
+    // [0] TEN  = 0 LPTMR 定时器关闭
+    LPTMR0->CSR = LPTMR_CSR_TFC(1) | LPTMR_CSR_TIE(1);
+		
+    // 设定低功耗定时器比较寄存器
+    LPTMR0->CMR = xExpectedIdleTime; //定时 xExpectedIdleTime 个 tick 后 产生中断 
+		
+		// LPTMR0_Interrupt
+    S32_NVIC->ICPR[1] = (1 << (58 % 32)); //58: s32k144.h 文件中 LPTMR0_IRQn 的值
+    S32_NVIC->ISER[1] = (1 << (58 % 32));
+    S32_NVIC->IP[58]  = 1;  // Priority level 5
+
+    // [0] TEN  = 1 LPTMR 启动定时器
+	  LPTMR0->CSR |= LPTMR_CSR_TEN(1);
+
+}
+
+void run_to_VLPS (void)
+{
+	/* Adjust SCG settings to meet maximum frequencies value */
+//	scg_disable_pll_and_firc();
+	
+	/* Enable SLEEPDEEP bit in the Core
+	* (Allow deep sleep modes) */
+	S32_SCB->SCR |= S32_SCB_SCR_SLEEPDEEP_MASK;
+	
+	/* Allow very low power run mode */
+	SMC->PMPROT |= SMC_PMPROT_AVLP_MASK;
+	
+	/* Select VLPS Mode */
+	SMC->PMCTRL = SMC_PMCTRL_STOPM(2);
+	PMC->REGSC |= PMC_REGSC_BIASEN_MASK;
+	
+	/* Check if current mode is RUN mode */
+	if(SMC->PMSTAT == 0x01)
+	{
+		/* Go to deep sleep mode */
+		STANDBY();
+	}
+}
+
+/*******************************************************************************
+Function: enter_VLPS
+Notes   : VLPS in Sleep-On-Exit mode
+        : Should VLPS transition failed, reset the MCU
+*******************************************************************************/
+void enter_VLPS(void)
+{
+	
+	// 系统控制寄存器 在 Cortex m4 Generic User Guide.pdf 中有相关寄存器介绍
+	// S32_SCB_SCR_SLEEPDEEP = 1: 表示选择深度睡眠模式
+	S32_SCB->SCR |= S32_SCB_SCR_SLEEPDEEP(1) | S32_SCB_SCR_SLEEPONEXIT(1);
+	
+	// Bias Enable Bit
+	// This bit must be set to 1 when using VLP* modes.
+	PMC->REGSC |= PMC_REGSC_BIASEN(1);
+	(void)PMC->REGSC; // Read-After-Write to ensure the register is written
+	
+	// Stop Mode Control
+	// [2-0] STOPM = Very-Low-Power Stop (VLPS)
+	SMC->PMCTRL |= SMC_PMCTRL_STOPM(2);
+	(void)SMC->PMCTRL; // Read-After-Write to ensure the register is written
+	
+	// Allow Very-Low-Power Modes
+	// [5] AVLP = 1 VLPS allowed
+	SMC->PMPROT |= SMC_PMPROT_AVLP(1);
+	(void)SMC->PMPROT; // Read-After-Write to ensure the register is written
+	
+			SEGGER_RTT_printf( 0, "S32_SCB->SCR:%x.\r\n", S32_SCB->SCR );
+			SEGGER_RTT_printf( 0, "PMC->REGSC:%x.\r\n", PMC->REGSC );
+			SEGGER_RTT_printf( 0, "SMC->PMCTRL:%x.\r\n", SMC->PMCTRL );
+
+	STANDBY();  // Move to Stop mode
+			
+}
+
+
+void application_sleep_enter_before( TickType_t xExpectedIdleTime )
+{
+
+}
+
+void application_sleep_enter_later( TickType_t xExpectedIdleTime )
 {
 	sosc_8mhz_init();       			 /* Initialize system oscilator for 8 MHz xtal */
 	spp_160mhz_init();     				 /* Initialize SPLL to 160 MHz with 8 MHz SOSC */
 	normal_80mhz_mode_run_init();  /* Init clocks: 80 MHz sysclk & core, 40 MHz bus, 20 MHz flash */
+	LED_PORT_init();	/* Configure port D0 as GPIO output (BLUE LED on EVB) */
+	
+	SEGGER_RTT_printf( 0, "application_sleep_enter_later:\r\n" );
+	SEGGER_RTT_printf( 0, "Low Power Timer Counter Register:%x.\r\n", LPTMR0->CNR );
+	SEGGER_RTT_printf( 0, "Low Power Timer Compare Register:%x.\r\n", LPTMR0->CMR );
+	
+	
+}
 
+
+#ifndef configSYSTICK_CLOCK_HZ
+	#define configSYSTICK_CLOCK_HZ configCPU_CLOCK_HZ
+	/* Ensure the SysTick is clocked at the same frequency as the core. */
+	#define portNVIC_SYSTICK_CLK_BIT_SUOZHANG	( 1UL << 2UL )
+#else
+	/* The way the SysTick is clocked is not modified in case it is not the same
+	as the core. */
+	#define portNVIC_SYSTICK_CLK_BIT	( 0 )
+#endif
+
+#define portNVIC_SYSTICK_INT_BIT_SUOZHANG			( 1UL << 1UL )
+#define portNVIC_SYSTICK_ENABLE_BIT_SUOZHANG			( 1UL << 0UL )
+#define portNVIC_SYSTICK_COUNT_FLAG_BIT_SUOZHANG		( 1UL << 16UL )
+#define portNVIC_PENDSVCLEAR_BIT_SUOZHANG 			( 1UL << 27UL )
+#define portNVIC_PEND_SYSTICK_CLEAR_BIT_SUOZHANG		( 1UL << 25UL )
+/*
+ * The maximum number of tick periods that can be suppressed is limited by the
+ * 16 bit resolution of the Low Power Timer.
+ */
+#if( configUSE_TICKLESS_IDLE == 1 )
+	static uint32_t xMaximumPossibleSuppressedTicks = 60000;
+#endif /* configUSE_TICKLESS_IDLE */
+
+/*
+ * The number of SysTick increments that make up one tick period.
+ */
+#if( configUSE_TICKLESS_IDLE == 1 )
+	static uint32_t ulTimerCountsForOneTick = ( configCPU_CLOCK_HZ / configTICK_RATE_HZ );
+#endif /* configUSE_TICKLESS_IDLE */
+
+#define portNVIC_SYSTICK_CTRL_REG_SUOZHANG					( * ( ( volatile uint32_t * ) 0xe000e010 ) )
+#define portNVIC_SYSTICK_LOAD_REG_SUOZHANG					( * ( ( volatile uint32_t * ) 0xe000e014 ) )
+#define portNVIC_SYSTICK_CURRENT_VALUE_REG_SUOZHANG	( * ( ( volatile uint32_t * ) 0xe000e018 ) )
+#define portNVIC_SYSPRI2_REG_SUOZHANG								( * ( ( volatile uint32_t * ) 0xe000ed20 ) )
+
+#if( configUSE_TICKLESS_IDLE == 1 )
+
+void application_sleep( TickType_t xExpectedIdleTime )
+{
+	uint32_t ulReloadValue, ulCompleteTickPeriods;
+	TickType_t xModifiableIdleTime;
+
+		/* Make sure the SysTick reload value does not overflow the counter. */
+		if( xExpectedIdleTime > xMaximumPossibleSuppressedTicks )
+		{
+			xExpectedIdleTime = xMaximumPossibleSuppressedTicks;
+		}
+
+		/* Stop the SysTick momentarily.  The time the SysTick is stopped for
+		is accounted for as best it can be, but using the tickless mode will
+		inevitably result in some tiny drift of the time maintained by the
+		kernel with respect to calendar time. */
+		portNVIC_SYSTICK_CTRL_REG_SUOZHANG &= ~portNVIC_SYSTICK_ENABLE_BIT_SUOZHANG;
+
+		/* Calculate the reload value required to wait xExpectedIdleTime
+		tick periods.  -1 is used because this code will execute part way
+		through one of the tick periods. */
+		ulReloadValue = xExpectedIdleTime - 1UL;
+
+		/* Enter a critical section but don't use the taskENTER_CRITICAL()
+		method as that will mask interrupts that should exit sleep mode. */
+		__disable_irq();
+		__dsb( portSY_FULL_READ_WRITE );
+		__isb( portSY_FULL_READ_WRITE );
+
+		/* If a context switch is pending or a task is waiting for the scheduler
+		to be unsuspended then abandon the low power entry. */
+		if( eTaskConfirmSleepModeStatus() == eAbortSleep )
+		{
+			/* Restart from whatever is left in the count register to complete
+			this tick period. */
+			portNVIC_SYSTICK_LOAD_REG_SUOZHANG = portNVIC_SYSTICK_CURRENT_VALUE_REG_SUOZHANG;
+
+			/* Restart SysTick. */
+			portNVIC_SYSTICK_CTRL_REG_SUOZHANG |= portNVIC_SYSTICK_ENABLE_BIT_SUOZHANG;
+
+			/* Reset the reload register to the value required for normal tick
+			periods. */
+			portNVIC_SYSTICK_LOAD_REG_SUOZHANG = ulTimerCountsForOneTick - 1UL;
+
+			/* Re-enable interrupts - see comments above __disable_irq() call
+			above. */
+			__enable_irq();
+		}
+		else
+		{
+			/* Set LPTMR the new reload value. */
+			init_lptmr_tick_interrupt( ulReloadValue );
+			
+			/* Sleep until something happens.  configPRE_SLEEP_PROCESSING() can
+			set its parameter to 0 to indicate that its implementation contains
+			its own wait for interrupt or wait for event instruction, and so wfi
+			should not be executed again.  However, the original expected idle
+			time variable must remain unmodified, so a copy is taken. */
+			xModifiableIdleTime = xExpectedIdleTime;
+			configPRE_SLEEP_PROCESSING( xModifiableIdleTime );
+			if( xModifiableIdleTime > 0 )
+			{
+				__dsb( portSY_FULL_READ_WRITE );
+				enter_VLPS(); /* suozhang, s32k144 enter VLPS mode */
+				__isb( portSY_FULL_READ_WRITE );
+			}
+			configPOST_SLEEP_PROCESSING( xExpectedIdleTime );
+
+			/* Re-enable interrupts to allow the interrupt that brought the MCU
+			out of sleep mode to execute immediately.  see comments above
+			__disable_interrupt() call above. */
+			__enable_irq();
+			__dsb( portSY_FULL_READ_WRITE );
+			__isb( portSY_FULL_READ_WRITE );
+
+			/* Disable interrupts again because the clock is about to be stopped
+			and interrupts that execute while the clock is stopped will increase
+			any slippage between the time maintained by the RTOS and calendar
+			time. */
+			__disable_irq();
+			__dsb( portSY_FULL_READ_WRITE );
+			__isb( portSY_FULL_READ_WRITE );
+
+			if( LPTMR0->CNR == 0 )
+			{/* 是低功耗定时器唤醒的CPU */
+
+				/* As the pending tick will be processed as soon as this
+				function exits, the tick value maintained by the tick is stepped
+				forward by one less than the time spent waiting. */
+				ulCompleteTickPeriods = xExpectedIdleTime - 1UL;
+				
+			}
+			else
+			{/* 其他中断唤醒的CPU */
+				
+				/* 读取 LPTMR Counter Register，用于 system tick 补偿 */
+				ulCompleteTickPeriods = xExpectedIdleTime;
+
+			}
+
+			/* Restart SysTick so it runs from portNVIC_SYSTICK_LOAD_REG
+			again, then set portNVIC_SYSTICK_LOAD_REG back to its standard
+			value. */
+			portNVIC_SYSTICK_CURRENT_VALUE_REG_SUOZHANG = 0UL;
+			portNVIC_SYSTICK_CTRL_REG_SUOZHANG |= portNVIC_SYSTICK_ENABLE_BIT_SUOZHANG;
+			vTaskStepTick( ulCompleteTickPeriods );
+			portNVIC_SYSTICK_LOAD_REG_SUOZHANG = ulTimerCountsForOneTick - 1UL;
+
+			/* Exit with interrpts enabled. */
+			__enable_irq();
+		}
+	}
+	
+#endif /* configUSE_TICKLESS_IDLE */
+
+
+int main( void )
+{
+
+
+
+	init_lptmr_tick_interrupt( 1000 );
+	
+	enter_VLPS();
+
+	sosc_8mhz_init();       			 /* Initialize system oscilator for 8 MHz xtal */
+	spp_160mhz_init();     				 /* Initialize SPLL to 160 MHz with 8 MHz SOSC */
+	normal_80mhz_mode_run_init();  /* Init clocks: 80 MHz sysclk & core, 40 MHz bus, 20 MHz flash */
+
+	
 	LED_PORT_init();	/* Configure port D0 as GPIO output (BLUE LED on EVB) */
 
 	xTaskCreate( vLedTask, "vLedTask", configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY+1, NULL );
@@ -132,6 +459,8 @@ void vLedTask( void *pvParameters )
 	for(;;)
 	{
 	
+//		init_lptmr_tick_interrupt( 1000 );
+		
 		led_triggle( 0 );
 		
 		SEGGER_RTT_printf( 0, "system tick:%u.\r\n", xTaskGetTickCount() );
