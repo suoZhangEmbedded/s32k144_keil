@@ -149,7 +149,6 @@ See http://www.FreeRTOS.org/RTOS-Cortex-M3-M4.html. */
 /* Tickless Idle Mode */
 #define configUSE_TICKLESS_IDLE                  1 
 #define configEXPECTED_IDLE_TIME_BEFORE_SLEEP    2 
-#define configUSE_TICKLESS_IDLE_DECISION_HOOK    0 
 
 /* Definitions that map the FreeRTOS port interrupt handlers to their CMSIS
 standard names. */
