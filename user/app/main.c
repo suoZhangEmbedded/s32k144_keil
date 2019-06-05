@@ -163,7 +163,7 @@ void vLedTask( void *pvParameters )
 		
 		SEGGER_RTT_printf( 0, "RTC counter :%u.\r\n", utc_time_now );
 		
-		vTaskDelay( 60000 );
+		vTaskDelay( 1000 );
 	
 	}
 }

@@ -53,8 +53,7 @@ Notes   : VLPS in Sleep-On-Exit mode
         : Should VLPS transition failed, reset the MCU
 *******************************************************************************/
 void vlps_init(void)
-{
-
+{	
 	// Allow Very-Low-Power Modes
 	// [5] AVLP = 1 VLPS allowed
 	// 系统复位后，这个寄存器只允许被写入一次
@@ -73,10 +72,10 @@ void vlps_init(void)
 	// [2-0] STOPM = Very-Low-Power Stop (VLPS)
 	SMC->PMCTRL |= SMC_PMCTRL_STOPM(2);
 	
-	SEGGER_RTT_printf( 0, "SMC->PMPROT:%x.\r\n", SMC->PMPROT );
-	SEGGER_RTT_printf( 0, "S32_SCB->SCR:%x.\r\n", S32_SCB->SCR );
-	SEGGER_RTT_printf( 0, "PMC->REGSC:%x.\r\n", PMC->REGSC );
-	SEGGER_RTT_printf( 0, "SMC->PMCTRL:%x.\r\n", SMC->PMCTRL );
+	SEGGER_RTT_printf( 0, "SMC->PMPROT:0x%x.\r\n", SMC->PMPROT );
+	SEGGER_RTT_printf( 0, "S32_SCB->SCR:0x%x.\r\n", S32_SCB->SCR );
+	SEGGER_RTT_printf( 0, "PMC->REGSC:0x%x.\r\n", PMC->REGSC );
+	SEGGER_RTT_printf( 0, "SMC->PMCTRL:0x%x.\r\n", SMC->PMCTRL );
 
 }
 
