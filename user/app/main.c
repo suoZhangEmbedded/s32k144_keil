@@ -19,6 +19,8 @@
 
 #include "freertos_tickless.h"
 
+#include "bsp_vlps.h"
+
 #include "bsp_rtc.h"
 
 void vLedTask( void *pvParameters );

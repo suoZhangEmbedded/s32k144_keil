@@ -397,6 +397,16 @@
               <FileType>1</FileType>
               <FilePath>..\user\app\bsp_rtc.c</FilePath>
             </File>
+            <File>
+              <FileName>bsp_vlps.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\user\app\bsp_vlps.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_lptmr.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\user\app\bsp_lptmr.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

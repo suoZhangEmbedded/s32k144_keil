@@ -9,20 +9,7 @@
  
 #include "freertos_tickless.h"
 
-#include "device_registers.h"
-#include "system_S32K144.h"
-#include "stdbool.h"
-
 #include "SEGGER_RTT.h"
-
-/* tickless 模式控制, 非0即关闭tickless模式 */
-
-#define tickless_MODE_ON													0x00000000UL  /* tickless 模式强制打开 */
-
-#define tickless_BIT_EN														0x01000000UL  /* tickless 总开关 标志位 */
-#define tickless_BIT_USEING_DEVICE_UART1					0x02000000UL  /* 串口1外设正在使用中 标志位 */
-#define tickless_BIT_USEING_DEVICE_CAN1						0x04000000UL  /* CAN1外设正在使用中 标志位 */
-
 
 volatile uint32_t tickless_mode_now = tickless_MODE_ON; /* 初始化 tickless 模式 */
 
@@ -47,123 +34,6 @@ void tickless_bit_off( uint32_t tickless_bit )
 
 }
 
-/*******************************************************************************
-Function: enter_VLPS
-Notes   : VLPS in Sleep-On-Exit mode
-        : Should VLPS transition failed, reset the MCU
-*******************************************************************************/
-void vlps_init(void)
-{	
-	// Allow Very-Low-Power Modes
-	// [5] AVLP = 1 VLPS allowed
-	// 系统复位后，这个寄存器只允许被写入一次
-	// The PMPROT register can be written only once after any system reset.
-	SMC->PMPROT |= SMC_PMPROT_AVLP(1);
-
-	// 系统控制寄存器 在 Cortex m4 Generic User Guide.pdf 中有相关寄存器介绍
-	// S32_SCB_SCR_SLEEPDEEP = 1: 表示选择深度睡眠模式
-	S32_SCB->SCR |= S32_SCB_SCR_SLEEPDEEP(1);
-
-	// Bias Enable Bit
-	// This bit must be set to 1 when using VLP* modes.
-	PMC->REGSC |= PMC_REGSC_BIASEN_MASK;
-	
-	// Stop Mode Control
-	// [2-0] STOPM = Very-Low-Power Stop (VLPS)
-	SMC->PMCTRL |= SMC_PMCTRL_STOPM(2);
-	
-	SEGGER_RTT_printf( 0, "SMC->PMPROT:0x%x.\r\n", SMC->PMPROT );
-	SEGGER_RTT_printf( 0, "S32_SCB->SCR:0x%x.\r\n", S32_SCB->SCR );
-	SEGGER_RTT_printf( 0, "PMC->REGSC:0x%x.\r\n", PMC->REGSC );
-	SEGGER_RTT_printf( 0, "SMC->PMCTRL:0x%x.\r\n", SMC->PMCTRL );
-
-}
-
-/*******************************************************************************
-Function: LPTMR0_IRQHandler
-*******************************************************************************/
-static volatile uint32_t lptmr_csr = 0; // 用于提前保存状态标志位，否则中断失能，标志位会被清除，不知为啥
-void LPTMR0_IRQHandler(void)
-{
-
-	// 使能 LPTMR 外设的接口时钟，允许访问 LPTMR 模块
-	PCC->PCCn[PCC_LPTMR0_INDEX] = PCC_PCCn_CGC_MASK; // Enable clock to LPTMR module - BUS_CLK
-
-	SEGGER_RTT_printf( 0, "\r\nLPTMR0_IRQHandler tick:%u.\r\n", xTaskGetTickCount() );
-	
-	// 提前保存状态标志位，否则下面中断失能，标志位会被清除，不知为啥
-	lptmr_csr = LPTMR0->CSR;
-	
-		SEGGER_RTT_printf( 0, "LPTMR0->CNR:%u.\r\n", LPTMR0->CNR );
-		SEGGER_RTT_printf( 0, "LPTMR0->CSR:%X.\r\n", LPTMR0->CSR );
-
-	// 定时器中断失能
-	LPTMR0->CSR &= ~LPTMR_CSR_TIE(0);
-
-}
-
-/*******************************************************************************
-Function: init_lptmr_tick_interrupt
-Notes   : 32kHz RTC clock derived from 128kHz internal LPO
-        : Time counter mode, interrupt enabled
-				: 1 tick == 1ms
-*******************************************************************************/
-void init_lptmr_tick_interrupt( TickType_t xExpectedIdleTime )
-{
-		SEGGER_RTT_printf( 0, "init_lptmr_tick_interrupt xExpectedIdleTime tick:%u.\r\n", xExpectedIdleTime );
-	
-    // Peripheral Clock Control for LPTMR
-		// 使能 LPTMR 外设的接口时钟，允许访问 LPTMR 模块
-    PCC->PCCn[PCC_LPTMR0_INDEX] = PCC_PCCn_CGC_MASK; // Enable clock to LPTMR module - BUS_CLK
-
-		LPTMR0->CNR |= 0XFFFF0000; 
-	
-		lptmr_csr = 0; //清0
-	
-		// [6] TIE  = 1 enable time interrupt
-    // [2] TFC  = 1 CNR is reset on overflow.
-    // [1] TMS  = 0 时间计数器模式
-    // [0] TEN  = 0 LPTMR 定时器关闭
-    LPTMR0->CSR = LPTMR_CSR_TFC(1) | LPTMR_CSR_TIE(1);
-	
-		/* LPTMR 时钟源有4种: 1: SIRCDIV2_CLK, 2: LPO1K_CLK, 3: RTC_CLK, 4: BUS_CLK */
-		/* FreeRTOS 是 1ms 一个 tick, 因此需要配置 LPTMR 产生 单位是 1ms 的中断 */
-		/* S32K144 VLPS模式下，只能选择 LPO1K_CLK, 或者 RTC_CLK  */
-		/* 这里选择 RTC_CLK,需要配置RTC_CLK时钟源，即寄存器 SIM->LPOCLKS[3-2] LPOCLKSEL,选择 LPO32K_CLK */
-		/* 因此这里 LPO32k_CLK 输出需要使能 */
-	
-		/* 错误警告：这里配置了 RTC 的时钟源，会影响RTC 的时钟，两者可能会冲突，请注意 */
-		/* 错误警告：LPO32k_CLK 和 LPO1k_CLK 不能同时使能，否则会选择 1K输出，请注意 */
-	
-		/* 第二种时钟方案：预分频器还可以旁路掉，也就是说 时钟源直接到 低功耗定时器计数寄存器，因此可以选择 LPO1K_CLK */
-	
-    // [5-4] RTCCLKSEL = 1 choose LPO32k_CLK
-    // [1] LPO32KCLKEN = 1 Enable LPO32k_CLK output
-    // [0] LPO1KCLKEN =  0 Disable LPO1k_CLK  output
-		SIM->LPOCLKS = SIM_LPOCLKS_RTCCLKSEL(1) | SIM_LPOCLKS_LPO32KCLKEN(1) | SIM_LPOCLKS_LPO1KCLKEN(0);
-
-    // LPO32K_CLK 时钟 到预分频器进行32分频，每16个上升沿，计数寄存器+1
-		// 这样 计数寄存器 ＋1 就是 1ms
-		// [6-3] PRESCALE  = 4 选择 32 分频
-    // [2] 	 PBYP      = 0 Enable 预分频器
-    // [1-0] PCS       = 2 根据手册2018.9.9 table 27-9 , 这里选择RTC_CLK
-		LPTMR0->PSR = LPTMR_PSR_PRESCALE(4) | LPTMR_PSR_PBYP(0) | LPTMR_PSR_PCS(2);
-		
-    // 设定低功耗定时器比较寄存器
-    LPTMR0->CMR = xExpectedIdleTime; //定时 xExpectedIdleTime 个 tick 后 产生中断 
-		
-		// LPTMR0_Interrupt
-    S32_NVIC->ICPR[1] = (1 << (58 % 32)); //58: s32k144.h 文件中 LPTMR0_IRQn 的值
-    S32_NVIC->ISER[1] = (1 << (58 % 32));
-    S32_NVIC->IP[58]  = 15;  // Priority level 15
-
-    // [0] TEN  = 1 LPTMR 启动定时器
-	  LPTMR0->CSR |= LPTMR_CSR_TEN(1);
-
-}
-
-
-
 void application_sleep_enter_before( TickType_t xExpectedIdleTime )
 {
 
@@ -175,13 +45,7 @@ void application_sleep_enter_later( TickType_t xExpectedIdleTime )
 {
 
 	SEGGER_RTT_printf( 0, "application_sleep_enter_later:\r\n" );
-
 	
-}
-
-uint32_t get_lpmrt_counter( void )
-{
-	return LPTMR0->CNR;
 }
 
 
@@ -233,7 +97,6 @@ void vPortSuppressTicksAndSleep( TickType_t xExpectedIdleTime )
 		{
 			// 终止进入 tickless 模式
 			return;
-		
 		}
 
 		/* Make sure the SysTick reload value does not overflow the counter. */
@@ -280,8 +143,8 @@ void vPortSuppressTicksAndSleep( TickType_t xExpectedIdleTime )
 		}
 		else
 		{
-			/* Set LPTMR the new reload value. */
-			init_lptmr_tick_interrupt( ulReloadValue );
+			/* Set low power timer the new reload value. */
+			port_low_power_time_tick( ulReloadValue );
 
 			/* Sleep until something happens.  configPRE_SLEEP_PROCESSING() can
 			set its parameter to 0 to indicate that its implementation contains
@@ -313,7 +176,7 @@ void vPortSuppressTicksAndSleep( TickType_t xExpectedIdleTime )
 			__dsb( portSY_FULL_READ_WRITE );
 			__isb( portSY_FULL_READ_WRITE );
 
-			if(lptmr_csr & LPTMR_CSR_TCF_MASK)
+			if( get_lpmrt_time_interrupt_flag() )
 			{/* 是低功耗定时器唤醒的CPU */
 
 				SEGGER_RTT_printf( 0, "lptmr wake up.\r\n" );
@@ -331,7 +194,7 @@ void vPortSuppressTicksAndSleep( TickType_t xExpectedIdleTime )
 
 				/* 读取 LPTMR Counter Register，用于 system tick 补偿 */
 				/* 这里直接读取寄存器 会卡死，不知为啥 */
-				ulCompleteTickPeriods = get_lpmrt_counter() ;
+				ulCompleteTickPeriods = port_get_low_power_time_counter();
 				
 				// 这里做保护, 定时器计数如果大于任务挂起时间，FreeRTOS 会有断言卡死，因此做保护
 				if( ulCompleteTickPeriods >= xExpectedIdleTime )
