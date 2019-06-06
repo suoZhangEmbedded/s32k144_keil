@@ -387,6 +387,26 @@
               <FileType>1</FileType>
               <FilePath>..\user\app\main.c</FilePath>
             </File>
+            <File>
+              <FileName>freertos_tickless.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\user\app\freertos_tickless.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_rtc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\user\app\bsp_rtc.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_vlps.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\user\app\bsp_vlps.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_lptmr.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\user\app\bsp_lptmr.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

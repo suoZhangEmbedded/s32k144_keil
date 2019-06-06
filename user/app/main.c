@@ -17,7 +17,23 @@
 
 #include "SEGGER_RTT.h"
 
+#include "freertos_tickless.h"
+
+#include "bsp_vlps.h"
+
+#include "bsp_rtc.h"
+
 void vLedTask( void *pvParameters );
+
+#define  LPTMR_COUNTER  ( * ( ( volatile uint32_t * ) 0x4004000Cu ) )
+
+/*******************************************************************************
+Function: delay
+*******************************************************************************/
+void delay(uint32_t d)
+{
+	while(d--);
+}
 
 void sosc_8mhz_init(void)
 {
@@ -111,10 +127,15 @@ void led_triggle(int leds)
 
 int main( void )
 {
+
+	vlps_init();
+	
+	init_rtc( 0 );  // 2019/6/4 17:33:00 = 1559640780 + 8*60*60
+	
 	sosc_8mhz_init();       			 /* Initialize system oscilator for 8 MHz xtal */
 	spp_160mhz_init();     				 /* Initialize SPLL to 160 MHz with 8 MHz SOSC */
 	normal_80mhz_mode_run_init();  /* Init clocks: 80 MHz sysclk & core, 40 MHz bus, 20 MHz flash */
-
+	
 	LED_PORT_init();	/* Configure port D0 as GPIO output (BLUE LED on EVB) */
 
 	xTaskCreate( vLedTask, "vLedTask", configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY+1, NULL );
@@ -129,14 +150,22 @@ int main( void )
 void vLedTask( void *pvParameters )
 {
 	
+	time_t utc_time_now = 0;
+	 
 	for(;;)
 	{
-	
+
 		led_triggle( 0 );
 		
-		SEGGER_RTT_printf( 0, "system tick:%u.\r\n", xTaskGetTickCount() );
+		SEGGER_RTT_printf( 0, "\r\nsystem tick :%u.\r\n", xTaskGetTickCount()/1000 );
 
-		vTaskDelay(1000 / portTICK_PERIOD_MS);
+		utc_time_now = get_rtc_utc_time();
+		
+//		SEGGER_RTT_printf( 0, "RTC time now :%s", ctime( &utc_time_now ) );
+		
+		SEGGER_RTT_printf( 0, "RTC counter :%u.\r\n", utc_time_now );
+		
+		vTaskDelay( 1000 );
 	
 	}
 }
