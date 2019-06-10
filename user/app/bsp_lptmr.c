@@ -86,9 +86,9 @@ void init_lptmr_tick( uint32_t xExpectedIdleTime )
     LPTMR0->CMR = xExpectedIdleTime; //定时 xExpectedIdleTime 个 tick 后 产生中断 
 		
 		// LPTMR0_Interrupt
-    S32_NVIC->ICPR[1] = (1 << (58 % 32)); //58: s32k144.h 文件中 LPTMR0_IRQn 的值
-    S32_NVIC->ISER[1] = (1 << (58 % 32));
-    S32_NVIC->IP[58]  = 15;  // Priority level 15
+    S32_NVIC->ICPR[1] = (1 << (LPTMR0_IRQn % 32));
+    S32_NVIC->ISER[1] = (1 << (LPTMR0_IRQn % 32));
+    S32_NVIC->IP[LPTMR0_IRQn]  = 15;  // Priority level 15
 
     // [0] TEN  = 1 LPTMR 启动定时器
 	  LPTMR0->CSR |= LPTMR_CSR_TEN(1);

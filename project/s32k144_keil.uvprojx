@@ -407,6 +407,16 @@
               <FileType>1</FileType>
               <FilePath>..\user\app\bsp_lptmr.c</FilePath>
             </File>
+            <File>
+              <FileName>bsp_lpuart.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\user\app\bsp_lpuart.c</FilePath>
+            </File>
+            <File>
+              <FileName>kfifo.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\user\app\kfifo.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

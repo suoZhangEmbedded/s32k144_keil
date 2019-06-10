@@ -23,6 +23,8 @@
 
 #include "bsp_rtc.h"
 
+#include "bsp_lpuart.h"
+
 void vLedTask( void *pvParameters );
 
 #define  LPTMR_COUNTER  ( * ( ( volatile uint32_t * ) 0x4004000Cu ) )
@@ -131,6 +133,8 @@ int main( void )
 	vlps_init();
 	
 	init_rtc( 0 );  // 2019/6/4 17:33:00 = 1559640780 + 8*60*60
+	
+	lpuart1_init();
 	
 	sosc_8mhz_init();       			 /* Initialize system oscilator for 8 MHz xtal */
 	spp_160mhz_init();     				 /* Initialize SPLL to 160 MHz with 8 MHz SOSC */
