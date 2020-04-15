@@ -1,3 +1,6 @@
 /project/Listings
 /project/Objects
 JLinkLog.txt
+*uvgui*
+*.bin
+*.hex
