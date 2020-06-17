@@ -47,3 +47,4 @@ void vlps_init( void )
 	SEGGER_RTT_printf( 0, "SMC->PMCTRL:0x%x.\r\n", SMC->PMCTRL );
 
 }
+

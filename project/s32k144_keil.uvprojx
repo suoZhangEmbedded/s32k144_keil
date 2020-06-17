@@ -417,6 +417,11 @@
               <FileType>1</FileType>
               <FilePath>..\user\app\kfifo.c</FilePath>
             </File>
+            <File>
+              <FileName>bsp_spi.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\user\app\bsp_spi.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
